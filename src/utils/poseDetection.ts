@@ -1,4 +1,4 @@
-import { PoseLandmarker, FilesetResolver } from '@mediapipe/tasks-vision';
+import { PoseLandmarker, HandLandmarker, FilesetResolver } from '@mediapipe/tasks-vision';
 
 export interface PoseLandmark {
   x: number;
@@ -7,12 +7,19 @@ export interface PoseLandmark {
   visibility?: number;
 }
 
+export interface HandLandmarks {
+  landmarks: PoseLandmark[];
+}
+
 export interface DetectedPose {
   landmarks: PoseLandmark[];
   worldLandmarks: PoseLandmark[];
+  leftHand?: HandLandmarks;
+  rightHand?: HandLandmarks;
 }
 
 let poseLandmarker: PoseLandmarker | null = null;
+let handLandmarker: HandLandmarker | null = null;
 
 export async function initializePoseDetection() {
   const vision = await FilesetResolver.forVisionTasks(
@@ -30,6 +37,18 @@ export async function initializePoseDetection() {
     minPosePresenceConfidence: 0.5,
     minTrackingConfidence: 0.5
   });
+
+  handLandmarker = await HandLandmarker.createFromOptions(vision, {
+    baseOptions: {
+      modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
+      delegate: "GPU"
+    },
+    runningMode: "VIDEO",
+    numHands: 2,
+    minHandDetectionConfidence: 0.5,
+    minHandPresenceConfidence: 0.5,
+    minTrackingConfidence: 0.5
+  });
   
   return poseLandmarker;
 }
@@ -37,13 +56,34 @@ export async function initializePoseDetection() {
 export function detectPose(video: HTMLVideoElement, timestamp: number): DetectedPose | null {
   if (!poseLandmarker) return null;
   
-  const results = poseLandmarker.detectForVideo(video, timestamp);
+  const poseResults = poseLandmarker.detectForVideo(video, timestamp);
   
-  if (results.landmarks && results.landmarks.length > 0) {
-    return {
-      landmarks: results.landmarks[0] as PoseLandmark[],
-      worldLandmarks: results.worldLandmarks ? results.worldLandmarks[0] as PoseLandmark[] : []
+  if (poseResults.landmarks && poseResults.landmarks.length > 0) {
+    const pose: DetectedPose = {
+      landmarks: poseResults.landmarks[0] as PoseLandmark[],
+      worldLandmarks: poseResults.worldLandmarks ? poseResults.worldLandmarks[0] as PoseLandmark[] : []
     };
+
+    // Detect hands
+    if (handLandmarker) {
+      const handResults = handLandmarker.detectForVideo(video, timestamp);
+      
+      if (handResults.landmarks && handResults.landmarks.length > 0) {
+        // MediaPipe returns hands but we need to determine left/right based on handedness
+        handResults.landmarks.forEach((handLandmarks, index) => {
+          const handedness = handResults.handednesses?.[index]?.[0];
+          const isLeft = handedness?.categoryName === 'Left';
+          
+          if (isLeft) {
+            pose.leftHand = { landmarks: handLandmarks as PoseLandmark[] };
+          } else {
+            pose.rightHand = { landmarks: handLandmarks as PoseLandmark[] };
+          }
+        });
+      }
+    }
+
+    return pose;
   }
   
   return null;
