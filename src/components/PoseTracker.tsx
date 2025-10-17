@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import AvatarRenderer from './AvatarRenderer';
 import { initializePoseDetection, detectPose, DetectedPose } from '@/utils/poseDetection';
-import { Play, Square, Activity } from 'lucide-react';
+import { Play, Square, Activity, Moon, Sun } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 const AVATARS = [
@@ -21,18 +21,31 @@ const PoseTracker = () => {
   const [currentPose, setCurrentPose] = useState<DetectedPose | null>(null);
   const [selectedAvatar, setSelectedAvatar] = useState('monkey');
   const [fps, setFps] = useState(0);
+  const [isDarkMode, setIsDarkMode] = useState(false);
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const animationFrameRef = useRef<number>();
   const lastFrameTimeRef = useRef<number>(0);
   const fpsCountRef = useRef<number>(0);
   const fpsTimeRef = useRef<number>(0);
+  const isTrackingRef = useRef<boolean>(false);
 
+  // Dark mode toggle
+  useEffect(() => {
+    if (isDarkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [isDarkMode]);
+
+  // Initialize pose detection
   useEffect(() => {
     const initPose = async () => {
       try {
         await initializePoseDetection();
         setIsInitialized(true);
+        console.log('Pose detection initialized successfully');
       } catch (error) {
         console.error('Failed to initialize pose detection:', error);
         toast({
@@ -57,7 +70,7 @@ const PoseTracker = () => {
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 640, height: 480 },
+        video: { width: 640, height: 480, facingMode: 'user' },
       });
 
       if (videoRef.current) {
@@ -65,6 +78,8 @@ const PoseTracker = () => {
         videoRef.current.onloadedmetadata = () => {
           videoRef.current?.play();
           setIsTracking(true);
+          isTrackingRef.current = true;
+          console.log('Camera started, beginning pose detection');
           detectPoseLoop();
           toast({
             title: 'Tracking Started',
@@ -83,6 +98,9 @@ const PoseTracker = () => {
   };
 
   const stopTracking = () => {
+    console.log('Stopping tracking');
+    isTrackingRef.current = false;
+    
     if (videoRef.current?.srcObject) {
       const stream = videoRef.current.srcObject as MediaStream;
       stream.getTracks().forEach(track => track.stop());
@@ -99,7 +117,10 @@ const PoseTracker = () => {
   };
 
   const detectPoseLoop = () => {
-    if (!videoRef.current || !isTracking) return;
+    if (!videoRef.current || !isTrackingRef.current) {
+      console.log('Pose loop stopped');
+      return;
+    }
 
     const video = videoRef.current;
     const now = performance.now();
@@ -116,6 +137,7 @@ const PoseTracker = () => {
       const pose = detectPose(video, now);
       if (pose) {
         setCurrentPose(pose);
+        console.log('Pose detected with', pose.landmarks.length, 'landmarks');
       }
     }
 
@@ -132,14 +154,25 @@ const PoseTracker = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5 p-6">
       <div className="max-w-7xl mx-auto space-y-6">
-        {/* Header */}
-        <div className="text-center space-y-2">
-          <h1 className="text-5xl font-bold bg-gradient-to-r from-primary via-secondary to-accent bg-clip-text text-transparent">
-            Pose Mirror
-          </h1>
-          <p className="text-muted-foreground text-lg">
-            Move your body and watch your avatar copy every motion in real-time!
-          </p>
+        {/* Header with Dark Mode Toggle */}
+        <div className="flex items-center justify-between">
+          <div className="text-center flex-1 space-y-2">
+            <h1 className="text-5xl font-bold bg-gradient-to-r from-primary via-secondary to-accent bg-clip-text text-transparent">
+              Pose Mirror
+            </h1>
+            <p className="text-muted-foreground text-lg">
+              Move your body and watch your avatar copy every motion in real-time!
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => setIsDarkMode(!isDarkMode)}
+            className="shrink-0"
+            title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+          >
+            {isDarkMode ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+          </Button>
         </div>
 
         {/* Avatar Selection */}
