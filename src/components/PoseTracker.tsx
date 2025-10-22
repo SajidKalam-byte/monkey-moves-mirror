@@ -2,9 +2,12 @@ import { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import AvatarRenderer from './AvatarRenderer';
+import ReferenceAvatarRenderer from './ReferenceAvatarRenderer';
 import { initializePoseDetection, detectPose, DetectedPose } from '@/utils/poseDetection';
-import { Play, Square, Activity, Moon, Sun } from 'lucide-react';
+import { calculatePoseSimilarity, getFeedbackMessage, shouldCelebrate, REFERENCE_POSES, ReferencePose } from '@/utils/poseComparison';
+import { Play, Square, Activity, Moon, Sun, Target, TrendingUp, Sparkles } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { Progress } from '@/components/ui/progress';
 
 const AVATARS = [
   { id: 'monkey', name: '🐵 Monkey', emoji: '🐵' },
@@ -22,6 +25,9 @@ const PoseTracker = () => {
   const [selectedAvatar, setSelectedAvatar] = useState('monkey');
   const [fps, setFps] = useState(0);
   const [isDarkMode, setIsDarkMode] = useState(false);
+  const [selectedReferencePose, setSelectedReferencePose] = useState<ReferencePose>(REFERENCE_POSES[0]);
+  const [accuracy, setAccuracy] = useState(0);
+  const [isCelebrating, setIsCelebrating] = useState(false);
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const animationFrameRef = useRef<number>();
@@ -137,7 +143,25 @@ const PoseTracker = () => {
       const pose = detectPose(video, now);
       if (pose) {
         setCurrentPose(pose);
-        console.log('Pose detected with', pose.landmarks.length, 'landmarks');
+        
+        // Calculate accuracy against reference pose
+        const referencePose: DetectedPose = {
+          landmarks: selectedReferencePose.landmarks,
+          worldLandmarks: [],
+        };
+        
+        const similarity = calculatePoseSimilarity(pose, referencePose);
+        setAccuracy(similarity);
+        
+        // Trigger celebration if accuracy is high
+        if (shouldCelebrate(similarity)) {
+          if (!isCelebrating) {
+            setIsCelebrating(true);
+            setTimeout(() => setIsCelebrating(false), 2000);
+          }
+        }
+        
+        console.log('Pose detected - Accuracy:', similarity + '%');
       }
     }
 
@@ -193,8 +217,80 @@ const PoseTracker = () => {
           </div>
         </Card>
 
+        {/* Reference Pose Selection */}
+        <Card className="p-4 shadow-lg border-2 bg-gradient-to-r from-primary/5 to-accent/5">
+          <div className="flex items-center justify-center gap-3 flex-wrap">
+            <div className="flex items-center gap-2">
+              <Target className="w-5 h-5 text-primary" />
+              <span className="text-sm font-medium text-muted-foreground">Target Pose:</span>
+            </div>
+            {REFERENCE_POSES.map((refPose) => (
+              <Button
+                key={refPose.id}
+                variant={selectedReferencePose.id === refPose.id ? 'default' : 'outline'}
+                size="lg"
+                onClick={() => setSelectedReferencePose(refPose)}
+                className="text-lg transition-all hover:scale-105"
+              >
+                {refPose.emoji} {refPose.name}
+              </Button>
+            ))}
+          </div>
+        </Card>
+
+        {/* Accuracy Display */}
+        {isTracking && (
+          <Card className="p-6 shadow-xl border-2 bg-gradient-to-br from-primary/10 via-background to-accent/10">
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <TrendingUp className="w-6 h-6 text-primary" />
+                  <h3 className="text-2xl font-bold">Pose Accuracy</h3>
+                </div>
+                <div className={`text-4xl font-bold ${getFeedbackMessage(accuracy).color} transition-all duration-300 ${isCelebrating ? 'scale-125 animate-pulse' : ''}`}>
+                  {accuracy}%
+                </div>
+              </div>
+              
+              <div className="space-y-2">
+                <Progress value={accuracy} className="h-4" />
+                <div className="flex justify-between items-center">
+                  <p className="text-muted-foreground text-sm">{selectedReferencePose.description}</p>
+                  <div className={`flex items-center gap-2 font-bold text-lg ${getFeedbackMessage(accuracy).color} transition-all duration-300`}>
+                    {isCelebrating && <Sparkles className="w-5 h-5 animate-spin" />}
+                    {getFeedbackMessage(accuracy).message}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </Card>
+        )}
+
         {/* Main Content */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Reference Pose Display */}
+          <Card className="overflow-hidden shadow-xl border-2 hover:shadow-2xl transition-shadow">
+            <div className="bg-gradient-to-br from-accent/10 to-secondary/10 p-4">
+              <h2 className="text-2xl font-bold text-center flex items-center justify-center gap-2">
+                <Target className="w-6 h-6" />
+                Target
+              </h2>
+            </div>
+            <div className="relative aspect-[4/3] bg-gradient-to-br from-primary/5 via-background to-accent/5 flex items-center justify-center">
+              <ReferenceAvatarRenderer 
+                pose={{
+                  landmarks: selectedReferencePose.landmarks,
+                  worldLandmarks: [],
+                }}
+                avatarType="reference"
+              />
+              <div className="absolute bottom-4 left-4 right-4 bg-background/90 backdrop-blur-sm p-3 rounded-lg border">
+                <p className="text-center font-semibold text-lg">{selectedReferencePose.emoji} {selectedReferencePose.name}</p>
+                <p className="text-center text-sm text-muted-foreground mt-1">{selectedReferencePose.description}</p>
+              </div>
+            </div>
+          </Card>
+
           {/* Webcam Feed */}
           <Card className="overflow-hidden shadow-xl border-2 hover:shadow-2xl transition-shadow">
             <div className="bg-gradient-to-br from-primary/10 to-secondary/10 p-4">
@@ -226,13 +322,31 @@ const PoseTracker = () => {
           </Card>
 
           {/* Avatar Display */}
-          <Card className="overflow-hidden shadow-xl border-2 hover:shadow-2xl transition-shadow">
+          <Card className={`overflow-hidden shadow-xl border-2 hover:shadow-2xl transition-all ${isCelebrating ? 'ring-4 ring-primary animate-pulse' : ''}`}>
             <div className="bg-gradient-to-br from-accent/10 to-primary/10 p-4">
               <h2 className="text-2xl font-bold text-center flex items-center justify-center gap-2">
                 {AVATARS.find(a => a.id === selectedAvatar)?.emoji} Your Avatar
               </h2>
             </div>
-            <div className="relative aspect-[4/3] bg-gradient-to-br from-muted via-background to-muted flex items-center justify-center">
+            <div className="relative aspect-[4/3] bg-gradient-to-br from-muted via-background to-muted flex items-center justify-center overflow-hidden">
+              {isCelebrating && (
+                <div className="absolute inset-0 pointer-events-none">
+                  {[...Array(20)].map((_, i) => (
+                    <div
+                      key={i}
+                      className="absolute text-4xl animate-ping"
+                      style={{
+                        left: `${Math.random() * 100}%`,
+                        top: `${Math.random() * 100}%`,
+                        animationDelay: `${Math.random() * 0.5}s`,
+                        animationDuration: '1s',
+                      }}
+                    >
+                      {['✨', '🌟', '⭐', '💫', '🎉'][Math.floor(Math.random() * 5)]}
+                    </div>
+                  ))}
+                </div>
+              )}
               {currentPose ? (
                 <AvatarRenderer pose={currentPose} avatarType={selectedAvatar} />
               ) : (
